@@ -103,6 +103,7 @@ var compressIcon = getEl('compress-icon');
 var accessToken = null;
 var pollingTimer = null;
 var currentTrackId = null;
+var manualAuthUrl = '';  // Pre-computed manual auth URL
 
 // ============================================
 // SPOTIFY AUTH (PKCE with pure JS SHA-256)
@@ -434,7 +435,18 @@ function showPlayer() {
 }
 
 function showManualAuth() {
-    // Generate PKCE and display the auth URL
+    // Use pre-computed URL from init()
+    manualUrl.textContent = manualAuthUrl;
+    manualCode.value = '';
+
+    loginScreen.className = loginScreen.className.indexOf('hidden') >= 0 ? loginScreen.className : (loginScreen.className + ' hidden');
+    manualScreen.className = manualScreen.className.replace(/hidden/g, '');
+    codeDisplayScreen.className = codeDisplayScreen.className.indexOf('hidden') >= 0 ? codeDisplayScreen.className : (codeDisplayScreen.className + ' hidden');
+    playerScreen.className = playerScreen.className.indexOf('hidden') >= 0 ? playerScreen.className : (playerScreen.className + ' hidden');
+}
+
+function regenerateManualAuth() {
+    // Generate fresh PKCE and update the displayed URL
     var codeVerifier = generateRandomString(64);
     var codeChallenge = base64url(sha256(codeVerifier));
     try { localStorage.setItem('code_verifier', codeVerifier); } catch(e) {}
@@ -448,13 +460,12 @@ function showManualAuth() {
         'scope=' + encodeURIComponent(SCOPES)
     ];
 
-    manualUrl.textContent = SPOTIFY_AUTH_URL + '?' + params.join('&');
-    manualCode.value = '';
+    manualAuthUrl = SPOTIFY_AUTH_URL + '?' + params.join('&');
 
-    loginScreen.className = loginScreen.className.indexOf('hidden') >= 0 ? loginScreen.className : (loginScreen.className + ' hidden');
-    manualScreen.className = manualScreen.className.replace(/hidden/g, '');
-    codeDisplayScreen.className = codeDisplayScreen.className.indexOf('hidden') >= 0 ? codeDisplayScreen.className : (codeDisplayScreen.className + ' hidden');
-    playerScreen.className = playerScreen.className.indexOf('hidden') >= 0 ? playerScreen.className : (playerScreen.className + ' hidden');
+    // If manual screen is visible, update the URL text
+    if (manualScreen.className.indexOf('hidden') < 0) {
+        manualUrl.textContent = manualAuthUrl;
+    }
 }
 
 function showManualCode(code) {
@@ -631,6 +642,9 @@ if (fullscreenBtn) {
 
 function init() {
     loadTheme();
+
+    // Pre-compute PKCE for manual auth (moves SHA-256 to page load)
+    regenerateManualAuth();
 
     // Check for OAuth callback (?code=...)
     var urlParams = {};
