@@ -6,7 +6,7 @@
 
 // You need to create a Spotify App at https://developer.spotify.com/dashboard
 // and set these values:
-const CLIENT_ID = '2720c95e55784dfeb3e6e0e3ba39afc4';
+const CLIENT_ID = '2ef0cd4d7b11458f921b55b83649949c';
 const REDIRECT_URI = window.location.origin + window.location.pathname;
 const SCOPES = [
     'user-read-playback-state',
