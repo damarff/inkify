@@ -65,7 +65,13 @@ function getEl(id) { return document.getElementById(id); }
 
 var loginScreen = getEl('login-screen');
 var playerScreen = getEl('player-screen');
+var manualScreen = getEl('manual-screen');
+var codeDisplayScreen = getEl('code-display-screen');
 var loginBtn = getEl('login-btn');
+var manualUrl = getEl('manual-url');
+var manualCode = getEl('manual-code');
+var manualConnectBtn = getEl('manual-connect-btn');
+var authCodeDisplay = getEl('auth-code-display');
 var logoutBtn = getEl('logout-btn');
 var albumArt = getEl('album-art');
 var noPlayback = getEl('no-playback');
@@ -414,13 +420,69 @@ function showPauseIcon() {
 function showLogin() {
     loginScreen.className = loginScreen.className.replace(/hidden/g, '');
     playerScreen.className = playerScreen.className.indexOf('hidden') >= 0 ? playerScreen.className : (playerScreen.className + ' hidden');
+    manualScreen.className = manualScreen.className.indexOf('hidden') >= 0 ? manualScreen.className : (manualScreen.className + ' hidden');
+    codeDisplayScreen.className = codeDisplayScreen.className.indexOf('hidden') >= 0 ? codeDisplayScreen.className : (codeDisplayScreen.className + ' hidden');
     stopPolling();
 }
 
 function showPlayer() {
     loginScreen.className = loginScreen.className.indexOf('hidden') >= 0 ? loginScreen.className : (loginScreen.className + ' hidden');
+    manualScreen.className = manualScreen.className.indexOf('hidden') >= 0 ? manualScreen.className : (manualScreen.className + ' hidden');
+    codeDisplayScreen.className = codeDisplayScreen.className.indexOf('hidden') >= 0 ? codeDisplayScreen.className : (codeDisplayScreen.className + ' hidden');
     playerScreen.className = playerScreen.className.replace(/hidden/g, '');
     startPolling();
+}
+
+function showManualAuth() {
+    // Generate PKCE and display the auth URL
+    var codeVerifier = generateRandomString(64);
+    var codeChallenge = base64url(sha256(codeVerifier));
+    try { localStorage.setItem('code_verifier', codeVerifier); } catch(e) {}
+
+    var params = [
+        'client_id=' + encodeURIComponent(CLIENT_ID),
+        'response_type=code',
+        'redirect_uri=' + encodeURIComponent(REDIRECT_URI),
+        'code_challenge_method=S256',
+        'code_challenge=' + encodeURIComponent(codeChallenge),
+        'scope=' + encodeURIComponent(SCOPES)
+    ];
+
+    manualUrl.textContent = SPOTIFY_AUTH_URL + '?' + params.join('&');
+    manualCode.value = '';
+
+    loginScreen.className = loginScreen.className.indexOf('hidden') >= 0 ? loginScreen.className : (loginScreen.className + ' hidden');
+    manualScreen.className = manualScreen.className.replace(/hidden/g, '');
+    codeDisplayScreen.className = codeDisplayScreen.className.indexOf('hidden') >= 0 ? codeDisplayScreen.className : (codeDisplayScreen.className + ' hidden');
+    playerScreen.className = playerScreen.className.indexOf('hidden') >= 0 ? playerScreen.className : (playerScreen.className + ' hidden');
+}
+
+function showManualCode(code) {
+    authCodeDisplay.textContent = code;
+
+    loginScreen.className = loginScreen.className.indexOf('hidden') >= 0 ? loginScreen.className : (loginScreen.className + ' hidden');
+    manualScreen.className = manualScreen.className.indexOf('hidden') >= 0 ? manualScreen.className : (manualScreen.className + ' hidden');
+    codeDisplayScreen.className = codeDisplayScreen.className.replace(/hidden/g, '');
+    playerScreen.className = playerScreen.className.indexOf('hidden') >= 0 ? playerScreen.className : (playerScreen.className + ' hidden');
+}
+
+function handleManualConnect() {
+    var code = manualCode.value ? manualCode.value.trim() : '';
+    if (!code) {
+        showError('Paste the code from your phone first');
+        return;
+    }
+
+    showError('Connecting...');
+    exchangeCodeForToken(code, function(err, tokenData) {
+        if (err) {
+            showError('Failed: ' + err.message);
+            return;
+        }
+        saveTokens(tokenData);
+        try { localStorage.removeItem('code_verifier'); } catch(e) {}
+        showPlayer();
+    });
 }
 
 function showError(msg) {
@@ -582,19 +644,29 @@ function init() {
     }
 
     if (urlParams.code) {
-        // We have an auth code — exchange it
-        showError('Authenticating...');
-        exchangeCodeForToken(urlParams.code, function(err, tokenData) {
-            if (err) {
-                showError('Auth failed: ' + err.message);
-                showLogin();
-                return;
-            }
-            saveTokens(tokenData);
-            // Clean URL
+        // Check if we have the code_verifier (Kindle) or not (phone relay)
+        var codeVerifier = '';
+        try { codeVerifier = localStorage.getItem('code_verifier') || ''; } catch(e) {}
+
+        if (codeVerifier) {
+            // Kindle: we generated the PKCE, do the exchange
+            showError('Authenticating...');
+            exchangeCodeForToken(urlParams.code, function(err, tokenData) {
+                if (err) {
+                    showError('Auth failed: ' + err.message);
+                    showLogin();
+                    return;
+                }
+                saveTokens(tokenData);
+                try { localStorage.removeItem('code_verifier'); } catch(e) {}
+                try { window.history.replaceState({}, document.title, REDIRECT_URI); } catch(e) {}
+                showPlayer();
+            });
+        } else {
+            // Phone: just relay — show the code for user to copy to Kindle
             try { window.history.replaceState({}, document.title, REDIRECT_URI); } catch(e) {}
-            showPlayer();
-        });
+            showManualCode(urlParams.code);
+        }
         return;
     }
 
