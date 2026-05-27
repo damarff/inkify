@@ -451,22 +451,40 @@ function stopPolling() {
 // EVENT HANDLERS
 // ============================================
 
-loginBtn.addEventListener('click', () => {
+function handleConnect() {
     redirectToSpotifyAuth();
+}
+loginBtn.addEventListener('click', handleConnect);
+loginBtn.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    handleConnect();
 });
 
-logoutBtn.addEventListener('click', () => {
+function handleLogout() {
     clearTokens();
     showLogin();
+}
+logoutBtn.addEventListener('click', handleLogout);
+logoutBtn.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    handleLogout();
 });
 
 themeBtn.addEventListener('click', toggleTheme);
+themeBtn.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    toggleTheme();
+});
 
 fullscreenBtn.addEventListener('click', toggleFullscreen);
+fullscreenBtn.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    toggleFullscreen();
+});
 
 document.addEventListener('fullscreenchange', updateFullscreenIcon);
 
-playPauseBtn.addEventListener('click', async () => {
+async function handlePlayPause() {
     setControlsLoading(true);
     try {
         const state = await getPlaybackState();
@@ -475,39 +493,51 @@ playPauseBtn.addEventListener('click', async () => {
         } else {
             await resumePlayback();
         }
-        // Fetch updated state
         await pollPlaybackState();
     } catch (error) {
         showError(error.message);
     } finally {
         setControlsLoading(false);
     }
+}
+playPauseBtn.addEventListener('click', handlePlayPause);
+playPauseBtn.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    handlePlayPause();
 });
 
-prevBtn.addEventListener('click', async () => {
+async function handlePrev() {
     setControlsLoading(true);
     try {
         await skipToPrevious();
-        // Small delay for Spotify to update
         setTimeout(pollPlaybackState, 300);
     } catch (error) {
         showError(error.message);
     } finally {
         setControlsLoading(false);
     }
+}
+prevBtn.addEventListener('click', handlePrev);
+prevBtn.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    handlePrev();
 });
 
-nextBtn.addEventListener('click', async () => {
+async function handleNext() {
     setControlsLoading(true);
     try {
         await skipToNext();
-        // Small delay for Spotify to update
         setTimeout(pollPlaybackState, 300);
     } catch (error) {
         showError(error.message);
     } finally {
         setControlsLoading(false);
     }
+}
+nextBtn.addEventListener('click', handleNext);
+nextBtn.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    handleNext();
 });
 
 // ============================================
