@@ -217,7 +217,7 @@ async function spotifyFetch(endpoint, options = {}) {
 }
 
 async function getPlaybackState() {
-    const response = await spotifyFetch('/me/player');
+    const response = await spotifyFetch('/me/player/currently-playing');
 
     if (response.status === 204) {
         return null; // No active playback
