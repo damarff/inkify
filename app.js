@@ -99,53 +99,180 @@ var pollingTimer = null;
 var currentTrackId = null;
 
 // ============================================
-// SPOTIFY AUTH (Implicit Grant - no PKCE needed)
+// SPOTIFY AUTH (PKCE with pure JS SHA-256)
 // ============================================
 
-function buildAuthUrl() {
-    var params = [
-        'client_id=' + encodeURIComponent(CLIENT_ID),
-        'response_type=token',
-        'redirect_uri=' + encodeURIComponent(REDIRECT_URI),
-        'scope=' + encodeURIComponent(SCOPES)
-    ];
-    return SPOTIFY_AUTH_URL + '?' + params.join('&');
+// Pure JS SHA-256 for Kindle (no Web Crypto needed)
+function sha256(s) {
+    var chrsz = 8;
+    function safe_add(x, y) { var lsw = (x & 0xFFFF) + (y & 0xFFFF); return (x >> 16) + (y >> 16) + (lsw >> 16) << 16 | lsw & 0xFFFF; }
+    function S(X, n) { return X >>> n | X << (32 - n); }
+    function R(X, n) { return X >>> n; }
+    function Ch(x, y, z) { return x & y ^ ~x & z; }
+    function Maj(x, y, z) { return x & y ^ x & z ^ y & z; }
+    function Sigma0256(x) { return S(x, 2) ^ S(x, 13) ^ S(x, 22); }
+    function Sigma1256(x) { return S(x, 6) ^ S(x, 11) ^ S(x, 25); }
+    function Gamma0256(x) { return S(x, 7) ^ S(x, 18) ^ R(x, 3); }
+    function Gamma1256(x) { return S(x, 17) ^ S(x, 19) ^ R(x, 10); }
+    function core_sha256(m, l) {
+        var K = [1116352408,1899447441,3049323471,3921009573,961987163,1508970993,2453635748,2870763221,3624381080,310598401,607225278,1426881987,1925078388,2162078206,2614888103,3248222580,3835390401,4022224774,264347078,604807628,770255983,1249150122,1555081692,1996064986,2554220882,2821834349,2952996808,3210313671,3336571891,3584528711,113926993,338241895,666307205,773529912,1294757372,1396182291,1695183700,1986661051,2177026350,2456956037,2730485921,2820302411,3259730800,3345764771,3516065817,3600352804,4094571909,275423344,430227734,506948616,659060556,883997877,958139571,1322822218,1537002063,1747873779,1955562222,2024104815,2227730452,2361852424,2428436474,2756734187,3204031479,3329325298];
+        var HASH = [1779033703,3144134277,1013904242,2773480762,1359893119,2600822924,528734635,1541459225];
+        var W = new Array(64), a, b, c, d, e, f, g, h, i, j, T1, T2;
+        m[l >> 5] |= 0x80 << (24 - l % 32);
+        m[(l + 64 >> 9 << 4) + 15] = l;
+        for (i = 0; i < m.length; i += 16) {
+            a = HASH[0]; b = HASH[1]; c = HASH[2]; d = HASH[3];
+            e = HASH[4]; f = HASH[5]; g = HASH[6]; h = HASH[7];
+            for (j = 0; j < 64; j++) {
+                if (j < 16) W[j] = m[j + i]; else W[j] = safe_add(safe_add(safe_add(Gamma1256(W[j - 2]), W[j - 7]), Gamma0256(W[j - 15])), W[j - 16]);
+                T1 = safe_add(safe_add(safe_add(safe_add(h, Sigma1256(e)), Ch(e, f, g)), K[j]), W[j]);
+                T2 = safe_add(Sigma0256(a), Maj(a, b, c));
+                h = g; g = f; f = e; e = safe_add(d, T1); d = c; c = b; b = a; a = safe_add(T1, T2);
+            }
+            HASH[0] = safe_add(a, HASH[0]); HASH[1] = safe_add(b, HASH[1]); HASH[2] = safe_add(c, HASH[2]); HASH[3] = safe_add(d, HASH[3]);
+            HASH[4] = safe_add(e, HASH[4]); HASH[5] = safe_add(f, HASH[5]); HASH[6] = safe_add(g, HASH[6]); HASH[7] = safe_add(h, HASH[7]);
+        }
+        return HASH;
+    }
+    function str2binb(str) {
+        var bin = [], mask = (1 << chrsz) - 1, i;
+        for (i = 0; i < str.length * chrsz; i += chrsz) bin[i >> 5] |= (str.charCodeAt(i / chrsz) & mask) << (24 - i % 32);
+        return bin;
+    }
+    function binb2bytes(binarray) {
+        var bytes = [], i;
+        for (i = 0; i < binarray.length * 4; i++) bytes.push(binarray[i >> 2] >> (3 - i % 4) * 8 & 0xFF);
+        return bytes;
+    }
+    return binb2bytes(core_sha256(str2binb(s), s.length * chrsz));
 }
 
-function saveTokenFromHash() {
-    var hash = window.location.hash.substring(1);
-    if (!hash) return false;
-
-    var params = {};
-    var pairs = hash.split('&');
-    for (var i = 0; i < pairs.length; i++) {
-        var kv = pairs[i].split('=');
-        if (kv.length === 2) params[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1]);
+function base64url(input) {
+    var str = '';
+    for (var i = 0; i < input.length; i++) {
+        str += String.fromCharCode(input[i]);
     }
+    return btoa(str).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
 
-    if (params.access_token) {
-        var expiresAt = Date.now() + (parseInt(params.expires_in || '3600') * 1000);
-        localStorage.setItem('access_token', params.access_token);
+function generateRandomString(length) {
+    var possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    var result = '';
+    for (var i = 0; i < length; i++) {
+        result += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return result;
+}
+
+function handleConnect() {
+    var codeVerifier = generateRandomString(64);
+    var codeChallenge = base64url(sha256(codeVerifier));
+
+    try { localStorage.setItem('code_verifier', codeVerifier); } catch(e) {}
+
+    var params = [
+        'client_id=' + encodeURIComponent(CLIENT_ID),
+        'response_type=code',
+        'redirect_uri=' + encodeURIComponent(REDIRECT_URI),
+        'code_challenge_method=S256',
+        'code_challenge=' + encodeURIComponent(codeChallenge),
+        'scope=' + encodeURIComponent(SCOPES)
+    ];
+
+    window.location.href = SPOTIFY_AUTH_URL + '?' + params.join('&');
+}
+
+function exchangeCodeForToken(code, callback) {
+    var codeVerifier = '';
+    try { codeVerifier = localStorage.getItem('code_verifier') || ''; } catch(e) {}
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', 'https://accounts.spotify.com/api/token', true);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+
+    xhr.onload = function() {
+        if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+                var data = JSON.parse(xhr.responseText);
+                if (callback) callback(null, data);
+            } catch(e) {
+                if (callback) callback(e);
+            }
+        } else {
+            if (callback) callback(new Error('Token exchange failed: ' + xhr.status));
+        }
+    };
+
+    xhr.onerror = function() {
+        if (callback) callback(new Error('Network error'));
+    };
+
+    var body = [
+        'client_id=' + encodeURIComponent(CLIENT_ID),
+        'grant_type=authorization_code',
+        'code=' + encodeURIComponent(code),
+        'redirect_uri=' + encodeURIComponent(REDIRECT_URI),
+        'code_verifier=' + encodeURIComponent(codeVerifier)
+    ];
+
+    xhr.send(body.join('&'));
+}
+
+function saveTokens(tokenData) {
+    var expiresAt = Date.now() + ((tokenData.expires_in || 3600) * 1000);
+    try {
+        localStorage.setItem('access_token', tokenData.access_token);
+        if (tokenData.refresh_token) localStorage.setItem('refresh_token', tokenData.refresh_token);
         localStorage.setItem('token_expires_at', expiresAt.toString());
-        // Also try to save the token in a way that survives navigation
-        // (Implicit Grant doesn't give refresh_token)
-        accessToken = params.access_token;
-        window.location.hash = '';
-        return true;
-    }
-    return false;
+    } catch(e) {}
+}
+
+function clearTokens() {
+    try {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('token_expires_at');
+        localStorage.removeItem('code_verifier');
+    } catch(e) {}
 }
 
 function getSavedToken() {
-    var token = localStorage.getItem('access_token');
-    var expiresAt = parseInt(localStorage.getItem('token_expires_at') || '0');
-    if (token && Date.now() < expiresAt) {
-        return token;
+    var token = '', expiresAt = 0, refreshToken = '';
+    try {
+        token = localStorage.getItem('access_token') || '';
+        expiresAt = parseInt(localStorage.getItem('token_expires_at') || '0');
+        refreshToken = localStorage.getItem('refresh_token') || '';
+    } catch(e) {}
+
+    if (!token) return null;
+
+    // Check if expired (within 5 min)
+    if (token && Date.now() > expiresAt - 300000) {
+        if (refreshToken) {
+            // Try to refresh via sync XHR (simplified for Kindle)
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', 'https://accounts.spotify.com/api/token', false); // sync
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            var body = [
+                'client_id=' + encodeURIComponent(CLIENT_ID),
+                'grant_type=refresh_token',
+                'refresh_token=' + encodeURIComponent(refreshToken)
+            ];
+            xhr.send(body.join('&'));
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    var refreshed = JSON.parse(xhr.responseText);
+                    saveTokens(refreshed);
+                    return refreshed.access_token;
+                } catch(e) {}
+            }
+            clearTokens();
+            return null;
+        }
+        clearTokens();
+        return null;
     }
-    // Token expired, clear it
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('token_expires_at');
-    return null;
+    return token;
 }
 
 // ============================================
@@ -215,24 +342,6 @@ function formatTime(ms) {
     var seconds = totalSeconds % 60;
     if (seconds < 10) seconds = '0' + seconds;
     return minutes + ':' + seconds;
-}
-
-function safeGet(obj, path) {
-    var parts = path.split('.');
-    var current = obj;
-    for (var i = 0; i < parts.length; i++) {
-        if (!current || typeof current !== 'object') return undefined;
-        // Handle array index in path like images[0]
-        var match = parts[i].match(/^(\w+)\[(\d+)\]$/);
-        if (match) {
-            current = current[match[1]];
-            if (!current || !current[parseInt(match[2])]) return undefined;
-            current = current[parseInt(match[2])];
-        } else {
-            current = current[parts[i]];
-        }
-    }
-    return current;
 }
 
 function updatePlayerUI(state) {
@@ -388,11 +497,6 @@ function stopPolling() {
 // ACTIONS
 // ============================================
 
-function handleConnect() {
-    // Set the href and navigate
-    window.location.href = buildAuthUrl();
-}
-
 function handleLogout() {
     try {
         localStorage.removeItem('access_token');
@@ -466,8 +570,33 @@ if (fullscreenBtn) {
 function init() {
     loadTheme();
 
-    // Check for OAuth callback in URL hash (Implicit Grant)
-    var tokenFromHash = saveTokenFromHash();
+    // Check for OAuth callback (?code=...)
+    var urlParams = {};
+    var search = window.location.search.substring(1);
+    if (search) {
+        var pairs = search.split('&');
+        for (var i = 0; i < pairs.length; i++) {
+            var kv = pairs[i].split('=');
+            if (kv.length === 2) urlParams[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1]);
+        }
+    }
+
+    if (urlParams.code) {
+        // We have an auth code — exchange it
+        showError('Authenticating...');
+        exchangeCodeForToken(urlParams.code, function(err, tokenData) {
+            if (err) {
+                showError('Auth failed: ' + err.message);
+                showLogin();
+                return;
+            }
+            saveTokens(tokenData);
+            // Clean URL
+            try { window.history.replaceState({}, document.title, REDIRECT_URI); } catch(e) {}
+            showPlayer();
+        });
+        return;
+    }
 
     // Check for existing token
     var saved = getSavedToken();
