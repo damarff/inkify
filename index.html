@@ -123,11 +123,27 @@
                         </button>
                     </div>
 
-                    <div id="device-info" class="device-info">
-                        <span id="device-name">---</span>
-                    </div>
+                <div id="device-info" class="device-info">
+                    <span id="device-name">---</span>
                 </div>
+
+                <button id="share-kindle-btn" class="btn btn-small" style="margin-top:8px;" title="Share with Kindle">
+                    📖 Share with Kindle
+                </button>
             </div>
+        </div>
+
+        <!-- Share Screen -->
+        <div id="share-screen" class="screen hidden">
+            <div class="logo">
+                <h2>Share with Kindle</h2>
+                <p class="tagline">Copy this URL and open it on your Kindle browser:</p>
+            </div>
+            <div id="share-url" style="font-size:0.7rem;word-break:break-all;padding:12px;border:1px solid var(--border-color);margin:12px 0;background:var(--accent-gray);max-height:200px;overflow-y:auto;"></div>
+            <p class="tagline" style="font-size:0.85rem;">Or paste this token manually:</p>
+            <div id="share-token-display" style="font-size:0.65rem;padding:8px;border:1px solid var(--border-color);margin:8px 0;background:var(--accent-gray);word-break:break-all;font-family:monospace;"></div>
+            <button id="back-from-share-btn" class="btn btn-small">Back to Player</button>
+        </div>
         </div>
 
         <!-- Error Display -->

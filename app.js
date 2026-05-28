@@ -15,6 +15,11 @@ var SPOTIFY_AUTH_URL = 'https://accounts.spotify.com/authorize';
 var SPOTIFY_API_BASE = 'https://api.spotify.com/v1';
 var POLLING_INTERVAL = 1500;
 
+// Relay server on VPS (for token sharing between devices)
+var RELAY_URL = window.location.origin.indexOf('github.io') >= 0
+    ? null  // GitHub Pages can't relay directly — use URL hash sharing instead
+    : window.location.origin + '/api/token';
+
 // ============================================
 // POLYFILL: fetch + Promise for old browsers
 // ============================================
@@ -67,6 +72,7 @@ var loginScreen = getEl('login-screen');
 var playerScreen = getEl('player-screen');
 var manualScreen = getEl('manual-screen');
 var codeDisplayScreen = getEl('code-display-screen');
+var shareScreen = getEl('share-screen');
 var loginBtn = getEl('login-btn');
 var manualUrl = getEl('manual-url');
 var manualCode = getEl('manual-code');
@@ -232,6 +238,9 @@ function saveTokens(tokenData) {
         if (tokenData.refresh_token) localStorage.setItem('refresh_token', tokenData.refresh_token);
         localStorage.setItem('token_expires_at', expiresAt.toString());
     } catch(e) {}
+
+    // Also save to relay server (for Kindle sync)
+    relaySaveToken(tokenData.access_token, tokenData.refresh_token || '', expiresAt);
 }
 
 function clearTokens() {
@@ -241,6 +250,107 @@ function clearTokens() {
         localStorage.removeItem('token_expires_at');
         localStorage.removeItem('code_verifier');
     } catch(e) {}
+    relayClearToken();
+}
+
+// ============================================
+// TOKEN RELAY (share token between devices)
+// ============================================
+
+function relaySaveToken(accessToken, refreshToken, expiresAt) {
+    // 1. Save to relay server if available
+    if (RELAY_URL) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', RELAY_URL, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.send(JSON.stringify({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+            expires_at: expiresAt
+        }));
+    }
+
+    // 2. Store in session so we can generate share URL
+    try { sessionStorage.setItem('share_access', accessToken); } catch(e) {}
+    try { sessionStorage.setItem('share_refresh', refreshToken || ''); } catch(e) {}
+    try { sessionStorage.setItem('share_expires', expiresAt.toString()); } catch(e) {}
+}
+
+function relayClearToken() {
+    if (RELAY_URL) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', RELAY_URL + '/clear', true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.send('{}');
+    }
+}
+
+function relayLoadFromServer(callback) {
+    // Try to load token from relay server
+    if (!RELAY_URL) {
+        if (callback) callback(null);
+        return;
+    }
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', RELAY_URL, true);
+    xhr.onload = function() {
+        if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+                var data = JSON.parse(xhr.responseText);
+                if (data && data.access_token) {
+                    if (callback) callback(data);
+                    return;
+                }
+            } catch(e) {}
+        }
+        if (callback) callback(null);
+    };
+    xhr.onerror = function() {
+        if (callback) callback(null);
+    };
+    xhr.send();
+}
+
+function relayLoadFromHash() {
+    // Check URL hash for token (shared from phone)
+    var hash = window.location.hash.substring(1);
+    if (!hash) return null;
+
+    var params = {};
+    var parts = hash.split('&');
+    for (var i = 0; i < parts.length; i++) {
+        var kv = parts[i].split('=');
+        if (kv.length === 2) params[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1]);
+    }
+
+    if (params.access_token) {
+        var tokenData = {
+            access_token: params.access_token,
+            refresh_token: params.refresh_token || '',
+            expires_in: 3600,
+            _expires_at: parseInt(params.expires_at) || (Date.now() + 3600000)
+        };
+        return tokenData;
+    }
+    return null;
+}
+
+function generateShareUrl() {
+    var token = '';
+    var refresh = '';
+    var expires = '0';
+    try {
+        token = sessionStorage.getItem('share_access') || localStorage.getItem('access_token') || '';
+        refresh = sessionStorage.getItem('share_refresh') || localStorage.getItem('refresh_token') || '';
+        expires = sessionStorage.getItem('share_expires') || localStorage.getItem('token_expires_at') || '0';
+    } catch(e) {}
+
+    if (!token) return null;
+
+    var base = window.location.origin + window.location.pathname;
+    return base + '#access_token=' + encodeURIComponent(token)
+        + '&refresh_token=' + encodeURIComponent(refresh)
+        + '&expires_at=' + encodeURIComponent(expires);
 }
 
 function getSavedToken() {
@@ -423,6 +533,7 @@ function showLogin() {
     playerScreen.className = playerScreen.className.indexOf('hidden') >= 0 ? playerScreen.className : (playerScreen.className + ' hidden');
     manualScreen.className = manualScreen.className.indexOf('hidden') >= 0 ? manualScreen.className : (manualScreen.className + ' hidden');
     codeDisplayScreen.className = codeDisplayScreen.className.indexOf('hidden') >= 0 ? codeDisplayScreen.className : (codeDisplayScreen.className + ' hidden');
+    shareScreen.className = shareScreen.className.indexOf('hidden') >= 0 ? shareScreen.className : (shareScreen.className + ' hidden');
     stopPolling();
 }
 
@@ -431,7 +542,31 @@ function showPlayer() {
     manualScreen.className = manualScreen.className.indexOf('hidden') >= 0 ? manualScreen.className : (manualScreen.className + ' hidden');
     codeDisplayScreen.className = codeDisplayScreen.className.indexOf('hidden') >= 0 ? codeDisplayScreen.className : (codeDisplayScreen.className + ' hidden');
     playerScreen.className = playerScreen.className.replace(/hidden/g, '');
+    shareScreen.className = shareScreen.className.indexOf('hidden') >= 0 ? shareScreen.className : (shareScreen.className + ' hidden');
     startPolling();
+}
+
+function showShareScreen() {
+    // Generate share URL and show it
+    var url = generateShareUrl();
+    if (!url) {
+        showError('No token to share. Connect Spotify first.');
+        return;
+    }
+
+    // Extract token from share URL for display
+    var tokenPart = url.split('#access_token=')[1];
+    var shortToken = tokenPart ? tokenPart.split('&')[0].substring(0, 20) + '...' : '';
+
+    getEl('share-url').textContent = url;
+    getEl('share-token-display').textContent = shortToken;
+
+    loginScreen.className = loginScreen.className.indexOf('hidden') >= 0 ? loginScreen.className : (loginScreen.className + ' hidden');
+    manualScreen.className = manualScreen.className.indexOf('hidden') >= 0 ? manualScreen.className : (manualScreen.className + ' hidden');
+    codeDisplayScreen.className = codeDisplayScreen.className.indexOf('hidden') >= 0 ? codeDisplayScreen.className : (codeDisplayScreen.className + ' hidden');
+    playerScreen.className = playerScreen.className.indexOf('hidden') >= 0 ? playerScreen.className : (playerScreen.className + ' hidden');
+    shareScreen.className = shareScreen.className.replace(/hidden/g, '');
+    stopPolling();
 }
 
 function showManualAuth() {
@@ -647,6 +782,12 @@ function bindButtons() {
     var doneBtn = getEl('done-btn');
     bindClick(doneBtn, showLogin);
 
+    var shareKindleBtn = getEl('share-kindle-btn');
+    bindClick(shareKindleBtn, showShareScreen);
+
+    var backFromShareBtn = getEl('back-from-share-btn');
+    bindClick(backFromShareBtn, showPlayer);
+
     // Fullscreen
     if (fullscreenBtn) {
         bindClick(fullscreenBtn, function() {
@@ -708,11 +849,40 @@ function init() {
         return;
     }
 
-    // Check for existing token
+    // Check for token shared via URL hash (phone → Kindle)
+    var hashToken = relayLoadFromHash();
+    if (hashToken) {
+        saveTokens(hashToken);
+        try { window.location.hash = ''; } catch(e) {}
+        try { window.history.replaceState({}, document.title, REDIRECT_URI); } catch(e) {}
+        showPlayer();
+        return;
+    }
+
+    // Check for existing token in localStorage
     var saved = getSavedToken();
     if (saved) {
         accessToken = saved;
         showPlayer();
+        return;
+    }
+
+    // No token anywhere — try relay server (VPS access)
+    if (RELAY_URL) {
+        relayLoadFromServer(function(data) {
+            if (data && data.access_token) {
+                showError('Token found on server!');
+                var td = {
+                    access_token: data.access_token,
+                    refresh_token: data.refresh_token || '',
+                    expires_in: 3600,
+                };
+                saveTokens(td);
+                showPlayer();
+            } else {
+                showLogin();
+            }
+        });
     } else {
         showLogin();
     }

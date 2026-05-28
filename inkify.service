@@ -6,9 +6,10 @@ After=network.target
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/inkify
-ExecStart=/usr/bin/python3 -m http.server 8766
+ExecStart=/usr/bin/python3 /home/ubuntu/inkify/server.py
 Restart=on-failure
 RestartSec=5
+Environment=PORT=8766
 
 [Install]
 WantedBy=multi-user.target
