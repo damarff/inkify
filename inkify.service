@@ -1,0 +1,14 @@
+[Unit]
+Description=Inkify - Spotify Remote Control
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/inkify
+ExecStart=/usr/bin/python3 -m http.server 8766
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

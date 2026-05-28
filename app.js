@@ -613,27 +613,48 @@ function handleNext() {
 }
 
 // ============================================
-// EVENT HANDLERS
+// EVENT BINDING (click + touchstart for Kindle e-ink)
 // ============================================
 
-loginBtn.onclick = handleConnect;
-logoutBtn.onclick = handleLogout;
-themeBtn.onclick = toggleTheme;
-playPauseBtn.onclick = handlePlayPause;
-prevBtn.onclick = handlePrev;
-nextBtn.onclick = handleNext;
+function bindClick(el, handler) {
+    if (!el) return;
+    el.onclick = handler;
+    // Kindle e-ink browser sometimes doesn't fire click on touch
+    try { el.addEventListener('touchstart', function(e) { handler(e); }, {passive: true}); } catch(e) {}
+}
 
-// ============================================
-// THEME LISTENER
-// ============================================
+function bindButtons() {
+    bindClick(loginBtn, handleConnect);
+    bindClick(logoutBtn, handleLogout);
+    bindClick(themeBtn, toggleTheme);
+    bindClick(playPauseBtn, handlePlayPause);
+    bindClick(prevBtn, handlePrev);
+    bindClick(nextBtn, handleNext);
 
-// Fullscreen (keep only if supported)
-if (fullscreenBtn) {
-    fullscreenBtn.onclick = function() {
-        if (document.documentElement.requestFullscreen) {
-            document.documentElement.requestFullscreen();
-        }
-    };
+    // Manual auth buttons (no JS variable, use getElementById)
+    var manualBtn = getEl('manual-btn');
+    bindClick(manualBtn, showManualAuth);
+
+    var manualConnBtn = getEl('manual-connect-btn');
+    bindClick(manualConnBtn, handleManualConnect);
+
+    var regenerateBtn = getEl('regenerate-btn');
+    bindClick(regenerateBtn, regenerateManualAuth);
+
+    var backFromManualBtn = getEl('back-from-manual-btn');
+    bindClick(backFromManualBtn, showLogin);
+
+    var doneBtn = getEl('done-btn');
+    bindClick(doneBtn, showLogin);
+
+    // Fullscreen
+    if (fullscreenBtn) {
+        bindClick(fullscreenBtn, function() {
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen();
+            }
+        });
+    }
 }
 
 // ============================================
@@ -642,6 +663,9 @@ if (fullscreenBtn) {
 
 function init() {
     loadTheme();
+
+    // Bind all buttons (click + touchstart for Kindle)
+    bindButtons();
 
     // Pre-compute PKCE for manual auth (moves SHA-256 to page load)
     regenerateManualAuth();
